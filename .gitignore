@@ -1,0 +1,6 @@
+pkg
+bin
+target
+**/*.swp
+**/*.swo
+.vscode

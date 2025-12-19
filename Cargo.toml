@@ -1,0 +1,12 @@
+[workspace]
+resolver = "2"
+
+members = [
+  "json-data-cache",
+]
+
+[profile.dev]
+debug = true
+debug-assertions = false
+overflow-checks = false
+codegen-units = 512
