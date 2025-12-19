@@ -213,7 +213,7 @@ impl<'a> DataCache<'a> {
     }
 
     /// Match a pattern while storing captured named capture groups in data_cache
-    pub(crate) fn match_regex(&mut self, regex: &str, source: &str) -> Result<bool, JsonDataCacheError> {
+    pub fn match_regex(&mut self, regex: &str, source: &str) -> Result<bool, JsonDataCacheError> {
         match Regex::new(regex) {
             Ok(re) => {
                 match re.captures(source) {
