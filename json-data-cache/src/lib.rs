@@ -11,17 +11,17 @@ pub mod error;
 pub mod json_serializer;
 
 #[derive(Debug)]
-pub struct DataCache<'a> {
+pub struct DataCache {
     pub root: Value,
-    options: DataCacheOptions<'a>,
+    options: DataCacheOptions,
 }
 
 #[derive(Debug, Default)]
-pub struct DataCacheOptions<'a> {
-    pub reserved_cache_top_level_names: Vec<&'a str>
+pub struct DataCacheOptions {
+    pub reserved_cache_top_level_names: Vec<String>
 }
 
-impl<'a> fmt::Display for DataCache<'a> {
+impl fmt::Display for DataCache {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_fmt(format_args!("{}",
             serde_json::to_string(&self.as_string_values_map()).unwrap()
@@ -29,8 +29,8 @@ impl<'a> fmt::Display for DataCache<'a> {
     }
 }
 
-impl<'a> DataCache<'a> {
-    pub fn new(options: DataCacheOptions<'a>) -> Self {
+impl DataCache {
+    pub fn new(options: DataCacheOptions) -> Self {
         let new_data_cache = Self {
             root: json!({}),
             options,
@@ -220,7 +220,7 @@ impl<'a> DataCache<'a> {
                     Some(captures) => {
                         for name_opt in re.capture_names() {
                             if let Some(name) = name_opt {
-                                if self.options.reserved_cache_top_level_names.contains(&name) {
+                                if self.options.reserved_cache_top_level_names.iter().map(|s| s.as_str()).any(|i| i == name) {
                                     return Err(format!("Capturing into the reserved variable {name} is not allowed").into());
                                 }
                                 if let Some(matched) = captures.name(name) {
