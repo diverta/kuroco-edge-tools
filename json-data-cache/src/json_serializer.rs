@@ -229,7 +229,6 @@ impl JsonSerializer {
                                 double_serialized_index + double_serialized_current_map_length
                             )
                         };
-                        println!("DOUBLE CHILD FOR {path} : {}", String::from_utf8((&double_serialized.data[child_start..child_end]).to_vec()).unwrap());
                         let double_serialized_child_range: KeyValueRange = (child_start, child_end).into();
 
                         double_serialized.key_values.insert(path.to_string(), double_serialized_child_range);
@@ -317,8 +316,6 @@ impl JsonSerializer {
                                 double_serialized_index + double_serialized_current_array_length
                             )
                         };
-                        println!("DOUBLE CHILD FOR {path} : {}", String::from_utf8((&double_serialized.data[child_start..child_end]).to_vec()).unwrap());
-
                         let double_serialized_child_range: KeyValueRange = (child_start, child_end).into();
 
                         double_serialized.key_values.insert(path.to_string(), double_serialized_child_range);

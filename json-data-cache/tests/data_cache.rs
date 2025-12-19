@@ -80,7 +80,6 @@ fn data_cache() {
         let mut writer = BufWriter::new(Vec::new());
         assert!(data_cache.replace_with_data_cache(reader.as_bytes(), &mut writer).is_ok());
         let writer_string = String::from_utf8(writer.buffer().to_vec()).unwrap();
-        println!("X");
         assert_eq!(&writer_string, replacement);
     }
 }
