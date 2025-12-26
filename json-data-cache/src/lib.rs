@@ -1,11 +1,11 @@
 use core::{fmt, str};
-use std::{collections::HashMap, io};
+use std::{collections::HashMap, io, rc::Rc};
 
 use aho_corasick::AhoCorasick;
 use regex::Regex;
 use serde_json::{Value, json};
 
-use crate::{error::JsonDataCacheError, json_serializer::JsonSerializer};
+use crate::{error::JsonDataCacheError, json_serializer::{JsonSerializer, SerializedWithKeys}};
 
 pub mod error;
 pub mod json_serializer;
@@ -14,6 +14,16 @@ pub mod json_serializer;
 pub struct DataCache {
     pub root: Value,
     options: DataCacheOptions,
+    serialized_data: DataCacheSerializedData // Cache for AC & replacements, updated on each insert
+}
+
+#[derive(Debug, Default)]
+pub struct DataCacheSerializedData {
+    is_built: bool,
+    ac: Option<AhoCorasick>,
+    serialized: Option<SerializedWithKeys>, // In memory serialized data cache tree
+    double_serialized: Option<SerializedWithKeys>, // In memory doubly serialized data cache tree
+    replacements: Vec<Rc<[u8]>>
 }
 
 #[derive(Debug, Default)]
@@ -34,6 +44,7 @@ impl DataCache {
         let new_data_cache = Self {
             root: json!({}),
             options,
+            serialized_data: DataCacheSerializedData::default()
         };
         new_data_cache
     }
@@ -151,6 +162,8 @@ impl DataCache {
     /// If the target object exists and is an array, the value will be appended
     pub fn insert(&mut self, path: &str, value: Value) {
         Self::insert_rec(&mut self.root, path, value);
+
+        self.on_after_insert();
     }
 
     // A more efficient insert of many elements that only recalculates final state after all insertions instead of after each
@@ -158,6 +171,12 @@ impl DataCache {
         for (path, value) in values {
             Self::insert_rec(&mut self.root, &path, value);
         }
+        self.on_after_insert();
+    }
+
+    fn on_after_insert(&mut self) {
+        // Reset (cached) serialized data
+        self.serialized_data = DataCacheSerializedData::default()
     }
 
     fn as_string_values_map_rec(map: &mut HashMap<String, String>, parent: &Value, current_path: String) {
@@ -249,36 +268,46 @@ impl DataCache {
         R: io::Read,
         W: io::Write,
     {
-        let (serialized, double_serialized) = JsonSerializer::serialize(&self.root, true);
+        if !self.serialized_data.is_built {
+            // Rebuild serialized data
+            let (serialized, double_serialized) = JsonSerializer::serialize(&self.root, true);
 
-        // Build AC
-        let mut keys_count = serialized.key_values.len();
-        if let Some(double_serialized) = double_serialized.as_ref() {
-            keys_count += double_serialized.key_values.len();
-        }
-        let mut patterns: Vec<String> = Vec::with_capacity(keys_count);
-        let mut replacements: Vec<&[u8]> = Vec::with_capacity(keys_count);
+            self.serialized_data.serialized = Some(serialized);
+            self.serialized_data.double_serialized = double_serialized;
 
-        for (key, range) in serialized.key_values {
-            let formatted_key = format!("{{${key}}}");
-            patterns.push(formatted_key);
+            // Build AC
+            let mut keys_count = self.serialized_data.serialized.as_ref().unwrap().key_values.len();
+            if let Some(double_serialized) = self.serialized_data.double_serialized.as_ref() {
+                keys_count += double_serialized.key_values.len();
+            }
+            let mut patterns: Vec<String> = Vec::with_capacity(keys_count);
+            let mut replacements: Vec<Rc<[u8]>> = Vec::with_capacity(keys_count);
 
-            let actual_value = &serialized.data[range.start..range.end];
-            replacements.push(actual_value);
-        }
-        if let Some(double_serialized) = double_serialized.as_ref() {
-            for (key, range) in &double_serialized.key_values {
-                let formatted_key = format!("{{$${key}}}");
+            for (key, range) in &self.serialized_data.serialized.as_ref().unwrap().key_values {
+                let formatted_key = format!("{{${key}}}");
                 patterns.push(formatted_key);
 
-                let actual_value = &double_serialized.data[range.start..range.end];
-                replacements.push(actual_value);
+                let actual_value = &self.serialized_data.serialized.as_ref().unwrap().data[range.start..range.end];
+                replacements.push(actual_value.into());
             }
+            if let Some(double_serialized) = self.serialized_data.double_serialized.as_ref() {
+                for (key, range) in &double_serialized.key_values {
+                    let formatted_key = format!("{{$${key}}}");
+                    patterns.push(formatted_key);
+
+                    let actual_value = &double_serialized.data[range.start..range.end];
+                    replacements.push(actual_value.into());
+                }
+            }
+
+            self.serialized_data.ac = Some(AhoCorasick::new(patterns)?);
+            self.serialized_data.replacements = replacements;
+            self.serialized_data.is_built = true;
         }
 
-        let (ac, replacements) = AhoCorasick::new(patterns).map(|ac| (ac, replacements))?;
+        let ac = self.serialized_data.ac.as_ref().unwrap();
 
-        ac.try_stream_replace_all(reader, writer, &replacements)?;
+        ac.try_stream_replace_all(reader, writer, &self.serialized_data.replacements)?;
         Ok(())
     }
 }
