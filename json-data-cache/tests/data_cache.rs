@@ -69,6 +69,28 @@ fn data_cache() {
         Some(&String::from(r#"["first_el","second_el"]"#))
     );
 
+    // Special case : setting a property to an array of objects will set it to each object
+    data_cache.insert("array_of_objects", json!([
+        {"k1":"v1"},
+        {"k2":"v2"},
+        {"nested": {"original_child": "original_child_value"}},
+        "non_object"
+    ]));
+    data_cache.insert("array_of_objects.newkey", json!("newval"));
+    assert_eq!(data_cache.get("array_of_objects"), Some(&json!([
+        {"k1":"v1", "newkey":"newval"},
+        {"k2":"v2", "newkey":"newval"},
+        {"nested": {"original_child": "original_child_value"}, "newkey":"newval"},
+        "non_object" // Unaffected
+    ])));
+    data_cache.insert("array_of_objects.nested", json!({"new_child": "new_child_value"}));
+    assert_eq!(data_cache.get("array_of_objects"), Some(&json!([
+        {"k1":"v1", "newkey":"newval", "nested": {"new_child": "new_child_value"}},
+        {"k2":"v2", "newkey":"newval", "nested": {"new_child": "new_child_value"}},
+        {"nested": {"original_child": "original_child_value", "new_child": "new_child_value"}, "newkey":"newval"},
+        "non_object" // Unaffected
+    ])));
+
     // Test replacements
     for (input, replacement) in [
         ("{$basic_key.nested_key}", "nested_value"),

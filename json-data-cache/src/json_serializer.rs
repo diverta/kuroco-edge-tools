@@ -2,6 +2,12 @@ use std::collections::HashMap;
 
 use serde_json::Value;
 
+use crate::json_serializer::{json_length::JsonLength, key_value_range::Range, serialized_data::SerializedDataLegacy};
+
+mod json_length;
+mod key_value_range;
+pub(crate) mod serialized_data;
+
 /// A tool used to stringify a json Value, while collecting all keys and building slices
 /// In memory, there will be a single String with as many references to it as there are nested keys
 /// This is useful when using AhoCorasick to make mass replacements
@@ -9,73 +15,19 @@ use serde_json::Value;
 pub struct JsonSerializer {
 }
 
-#[derive(Debug)]
-pub struct KeyValueRange {
-    pub start: usize, // Including
-    pub end: usize // Excluding
-}
-
-impl From<(usize, usize)> for KeyValueRange {
-    fn from(value: (usize, usize)) -> Self {
-        Self {
-            start: value.0,
-            end: value.1
-        }
-    }
-}
-
-pub struct SerializedWithKeys {
-    pub data: Vec<u8>,
-    pub key_values: HashMap<String, KeyValueRange>,
-    pub length: usize,
-}
-
-impl std::fmt::Debug for SerializedWithKeys {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("SerializedWithKeys")
-            .field("data", &String::from_utf8(self.data.clone()).unwrap())
-            .field("key_values",&self.key_values)
-            .field("length", &self.length)
-            .finish()
-    }
-}
-
-/// Helps to distinguish between specifically the length of sting value in a JSON
-/// outer part is accounting for the surrounding quotes, but the inner part does not
-pub struct JsonLength {
-    pub inner: usize,
-    pub outer: usize,
-}
-impl From<usize> for JsonLength {
-    fn from(value: usize) -> Self {
-        Self {
-            inner: value,
-            outer: value,
-        }
-    }
-}
-impl From<(usize, usize)> for JsonLength {
-    fn from((inner, outer): (usize, usize)) -> Self {
-        Self {
-            inner,
-            outer,
-        }
-    }
-}
-
 impl JsonSerializer {
     /// Serialize a value and return it along with a list of all possible nested keys with the start & end indexes of their pointed value in the serialized result
     /// double_serialize, if set, will also provide a second doubly serialized string with its own set of value ranges - but without final double quotes!
-    pub fn serialize(value: &Value, double_serialize: bool) -> (SerializedWithKeys, Option<SerializedWithKeys>) {
+    pub fn serialize(value: &Value, double_serialize: bool) -> (SerializedDataLegacy, Option<SerializedDataLegacy>) {
         let mut path = String::new();
-        let mut serialized = SerializedWithKeys {
+        let mut serialized = SerializedDataLegacy {
             data: Vec::new(),
             key_values: HashMap::new(),
             length: 0
         };
         let mut double_serialized = if double_serialize {
             Some(
-                SerializedWithKeys {
+                SerializedDataLegacy {
                     data: Vec::new(),
                     key_values: HashMap::new(),
                     length: 0
@@ -99,8 +51,8 @@ impl JsonSerializer {
     fn rec_serialize(
         value: &Value,
         path: &mut String, // Pointing to the current parent, for example list.0
-        serialized: &mut SerializedWithKeys,
-        double_serialized: &mut Option<SerializedWithKeys>,
+        serialized: &mut SerializedDataLegacy,
+        double_serialized: &mut Option<SerializedDataLegacy>,
         serialized_index: usize,
         double_serialized_index: usize,
     ) -> (JsonLength, JsonLength) { // Return value is the length of the newly serialized element, for serialized and double_serialized
@@ -208,7 +160,7 @@ impl JsonSerializer {
                             serialized_index + serialized_current_map_length
                         )
                     };
-                    let serialized_child_range: KeyValueRange = (child_start, child_end).into();
+                    let serialized_child_range: Range = (child_start, child_end).into();
 
                     serialized.key_values.insert(path.to_string(), serialized_child_range);
 
@@ -229,7 +181,7 @@ impl JsonSerializer {
                                 double_serialized_index + double_serialized_current_map_length
                             )
                         };
-                        let double_serialized_child_range: KeyValueRange = (child_start, child_end).into();
+                        let double_serialized_child_range: Range = (child_start, child_end).into();
 
                         double_serialized.key_values.insert(path.to_string(), double_serialized_child_range);
                     }
@@ -296,7 +248,7 @@ impl JsonSerializer {
                         )
                     };
 
-                    let serialized_child_range: KeyValueRange = (child_start, child_end).into();
+                    let serialized_child_range: Range = (child_start, child_end).into();
 
                     serialized.key_values.insert(path.to_string(), serialized_child_range);
 
@@ -316,7 +268,7 @@ impl JsonSerializer {
                                 double_serialized_index + double_serialized_current_array_length
                             )
                         };
-                        let double_serialized_child_range: KeyValueRange = (child_start, child_end).into();
+                        let double_serialized_child_range: Range = (child_start, child_end).into();
 
                         double_serialized.key_values.insert(path.to_string(), double_serialized_child_range);
                     }

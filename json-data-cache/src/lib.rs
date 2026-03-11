@@ -5,7 +5,7 @@ use aho_corasick::AhoCorasick;
 use regex::Regex;
 use serde_json::{Value, json};
 
-use crate::{error::JsonDataCacheError, json_serializer::{JsonSerializer, SerializedWithKeys}};
+use crate::{error::JsonDataCacheError, json_serializer::{JsonSerializer, serialized_data::SerializedDataLegacy}};
 
 pub mod error;
 pub mod json_serializer;
@@ -21,8 +21,8 @@ pub struct DataCache {
 pub struct DataCacheSerializedData {
     is_built: bool,
     ac: Option<AhoCorasick>,
-    serialized: Option<SerializedWithKeys>, // In memory serialized data cache tree
-    double_serialized: Option<SerializedWithKeys>, // In memory doubly serialized data cache tree
+    serialized: Option<SerializedDataLegacy>, // In memory serialized data cache tree
+    double_serialized: Option<SerializedDataLegacy>, // In memory doubly serialized data cache tree
     replacements: Vec<Rc<[u8]>>
 }
 
@@ -89,7 +89,6 @@ impl DataCache {
                                 Self::insert_rec(&mut new_parent, remaining_path, value);
                                 new_parent
                             });
-                        
                     } else {
                         // No more nesting
                         if remaining_path == &"" {
@@ -105,25 +104,46 @@ impl DataCache {
                                 .or_insert(Value::Array(Vec::new()));
                             new_array.as_array_mut().unwrap().push(value);
                         } else {
-                            // Build object
-                            let new_object = parent_object
-                                .entry(*current_key)
-                                .and_modify(|existing| {
-                                    if !existing.is_object() {
-                                        // Force conversion to object
-                                        *existing = Value::Object(serde_json::Map::new());
+                            if parent_object.get(*current_key).map(|found| found.is_array()).unwrap_or(false) {
+                                // Special case : parent object is an array and we set a key => we want to set the give key & value for each object item
+                                let arr = parent_object.get_mut(*current_key).unwrap().as_array_mut().unwrap();
+                                for item in arr {
+                                    if item.is_object() {
+                                        let previous_value = item.as_object_mut().unwrap()
+                                            .entry(remaining_path.to_string())
+                                            .or_insert(Value::Object(serde_json::Map::new()));
+                                        if previous_value.is_object() && value.is_object() {
+                                            // Both are objects : merge is possible
+                                            Self::merge_rec(previous_value, value.clone());
+                                        } else {
+                                            // Replace the existing value by new one
+                                            item.as_object_mut().unwrap().insert(remaining_path.to_string(), value.clone());
+                                        }
+                                    } else {
+                                        // Not an object - ignore
                                     }
-                                })
-                                .or_insert(Value::Object(serde_json::Map::new()));
-                            let previous_value = new_object.as_object_mut().unwrap()
-                                .entry(remaining_path.to_string())
-                                .or_insert(Value::Object(serde_json::Map::new()));
-                            if previous_value.is_object() && value.is_object() {
-                                // Both are objects : merge is possible
-                                Self::merge_rec(previous_value, value);
+                                }
                             } else {
-                                // Replace the existing value by new one
-                                new_object.as_object_mut().unwrap().insert(remaining_path.to_string(), value);
+                                // Parent is not an object (not array special case), so we force its conversion to object
+                                let new_object = parent_object
+                                    .entry(*current_key)
+                                    .and_modify(|existing| {
+                                        if !existing.is_object() {
+                                            // Force conversion to object
+                                            *existing = Value::Object(serde_json::Map::new());
+                                        }
+                                    })
+                                    .or_insert(Value::Object(serde_json::Map::new()));
+                                let previous_value = new_object.as_object_mut().unwrap()
+                                    .entry(remaining_path.to_string())
+                                    .or_insert(Value::Object(serde_json::Map::new()));
+                                if previous_value.is_object() && value.is_object() {
+                                    // Both are objects : merge is possible
+                                    Self::merge_rec(previous_value, value);
+                                } else {
+                                    // Replace the existing value by new one
+                                    new_object.as_object_mut().unwrap().insert(remaining_path.to_string(), value);
+                                }
                             }
                         }
                     }
