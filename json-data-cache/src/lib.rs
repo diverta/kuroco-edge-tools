@@ -49,7 +49,7 @@ impl DataCache {
         new_data_cache
     }
 
-    fn insert_rec(parent: &mut Value, path: &str, value: Value) {
+    fn insert_rec(parent: &mut Value, path: &str, mut value: Value) {
         let two_parts: Vec<&str> = path.splitn(2, '.').collect(); // Can only have length 1 or 2
 
         if two_parts.len() == 1 {
@@ -107,17 +107,33 @@ impl DataCache {
                             if parent_object.get(*current_key).map(|found| found.is_array()).unwrap_or(false) {
                                 // Special case : parent object is an array and we set a key => we want to set the give key & value for each object item
                                 let arr = parent_object.get_mut(*current_key).unwrap().as_array_mut().unwrap();
-                                for item in arr {
+                                if value.is_array() {
+                                    // Prepare for special case of special case, and reverse value array to efficiently consume it during iterating
+                                    value.as_array_mut().unwrap().reverse();
+                                }
+                                for item in arr.iter_mut() {
+                                    let value_to_insert = if value.is_array() {
+                                        // Even more special case : if the value is an array, distribute it
+                                        let value_arr = value.as_array_mut().unwrap();
+                                        if value_arr.len() > 0 {
+                                            value_arr.pop().unwrap()
+                                        } else {
+                                            // Value array was shorter than parent, nothing left to distribute
+                                            break;
+                                        }
+                                    } else {
+                                        value.clone()
+                                    };
                                     if item.is_object() {
                                         let previous_value = item.as_object_mut().unwrap()
                                             .entry(remaining_path.to_string())
                                             .or_insert(Value::Object(serde_json::Map::new()));
-                                        if previous_value.is_object() && value.is_object() {
+                                        if previous_value.is_object() && value_to_insert.is_object() {
                                             // Both are objects : merge is possible
-                                            Self::merge_rec(previous_value, value.clone());
+                                            Self::merge_rec(previous_value, value_to_insert);
                                         } else {
                                             // Replace the existing value by new one
-                                            item.as_object_mut().unwrap().insert(remaining_path.to_string(), value.clone());
+                                            item.as_object_mut().unwrap().insert(remaining_path.to_string(), value_to_insert);
                                         }
                                     } else {
                                         // Not an object - ignore

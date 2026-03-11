@@ -91,6 +91,42 @@ fn data_cache() {
         "non_object" // Unaffected
     ])));
 
+    // Special case of a special case : setting a property to an array of objects with the value being another array
+    // will distribute value array's contents over each object's key matching the property
+    // If either parent or value array is too long, cuts off the longest array to match the size of the smallest
+    data_cache.insert("array_of_objects", json!([
+        {"k1":"v1"},
+        {"k2":"v2"},
+        {"nested": {"original_child": "original_child_value"}},
+        "non_object"
+    ]));
+    data_cache.insert("array_of_objects.newkey", json!(["newval1", "newval2"]));
+    assert_eq!(data_cache.get("array_of_objects"), Some(&json!([
+        {"k1":"v1", "newkey":"newval1"},
+        {"k2":"v2", "newkey":"newval2"},
+        {"nested": {"original_child": "original_child_value"}},
+        "non_object" // Unaffected
+    ])));
+    data_cache.insert("array_of_objects.newkey", json!(["newval1", "newval2", "newval3", "newval4", "newval5"]));
+    assert_eq!(data_cache.get("array_of_objects"), Some(&json!([
+        {"k1":"v1", "newkey":"newval1"},
+        {"k2":"v2", "newkey":"newval2"},
+        {"nested": {"original_child": "original_child_value"}, "newkey":"newval3"},
+        "non_object" // Unaffected
+    ])));
+    data_cache.insert("array_of_objects.nested", json!([
+        {"new_child": "new_child_value1"},
+        {"new_child": "new_child_value2"},
+        {"new_child": "new_child_value3"}
+    ]));
+    assert_eq!(data_cache.get("array_of_objects"), Some(&json!([
+        {"k1":"v1", "newkey":"newval1", "nested": {"new_child": "new_child_value1"}},
+        {"k2":"v2", "newkey":"newval2", "nested": {"new_child": "new_child_value2"}},
+        {"nested": {"original_child": "original_child_value", "new_child": "new_child_value3"}, "newkey":"newval3"},
+        "non_object" // Unaffected
+    ])));
+
+
     // Test replacements
     for (input, replacement) in [
         ("{$basic_key.nested_key}", "nested_value"),
