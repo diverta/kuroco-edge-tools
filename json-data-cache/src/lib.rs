@@ -260,11 +260,84 @@ impl DataCache {
         map
     }
 
-    /// Access a data node in the tree through a path expression
-    /// Example : get("root_object.some_array.0")
+    fn target_to_pointer(target: &str)-> String {
+        format!("/{}", target.replace(".", "/"))
+    }
+
+    /// Access a data node in the tree through a pointer path expression
+    /// Example: get("root_object.some_array.0") => <first element of array>
     pub fn get<'b>(&'b self, target: &str) -> Option<&'b Value> {
-        let target_pointer = format!("/{}", target.replace(".", "/"));
+        let target_pointer = DataCache::target_to_pointer(target);
         self.root.pointer(&target_pointer)
+    }
+
+    /// Get a list of references using a single wildcard * to collect specific data from a (nested) array
+    /// Example: get_list("root_object.*.id") => `[1,2,3,...]` assuming every element of the array is an object having an id property
+    pub fn get_list<'b>(&'b self, target: &str) -> Vec<&'b Value> {
+        let wildcard_match_indices: Vec<_> = target.match_indices("*").collect();
+        match wildcard_match_indices.len() {
+            0 => match self.root.pointer(&DataCache::target_to_pointer(target)) {
+                // Standard usage without wildcards => return a vector of 1 or 0 elements
+                Some(found) => Vec::from([found]),
+                None => Vec::new(),
+            },
+            1 => {
+                let (wc_idx, _) = wildcard_match_indices.get(0).unwrap();
+                let parent_array: Option<&Value> = if *wc_idx == 0 {
+                    if self.root.is_array() {
+                        // Actually impossible case, because with DataCache, root should never be an array.
+                        // But just in case this changes in the future, we can easily support this case
+                        Some(&self.root)
+                    } else {
+                        None
+                    }
+                } else {
+                    if &target[*wc_idx-1..*wc_idx] != "." {
+                        log::info!("[WARN] DataCache get_list : invalid target {}", target);
+                        None // Invalid syntax : if * is not the first character, then it is expected to be after a dot
+                    } else {
+                        let parent_path = &target[..*wc_idx-1];
+                        if let Some(parent_arr) = self.root.pointer(&DataCache::target_to_pointer(parent_path)) {
+                            if parent_arr.is_array() {
+                                Some(parent_arr)
+                            } else {
+                                None
+                            }
+                        } else {
+                            None
+                        }
+                    }
+                };
+                let suffix = &target[*wc_idx+1..];
+                match parent_array {
+                    Some(arr) => {
+                        // This unwrap is safe because parent_array is always confirmed to be an array to become Some during construction
+                        let parent_arr: &'b Vec<Value> = arr.as_array().unwrap();
+
+                        if suffix.len() == 0 {
+                            // Wildcard is the end => the parent itself, owned
+                            parent_arr.iter().collect::<Vec<&'b Value>>()
+                        } else if suffix.len() == 1 || &target[*wc_idx+1..*wc_idx+2] != "." {
+                            log::info!("[WARN] DataCache get_list : invalid target {}", target);
+                            // If the character after the wildcard not a dot, or if there is nothing else after the dot : invalid
+                            Vec::new()
+                        } else {
+                            let suffix = &suffix[1..]; // Without the following dot
+                            parent_arr.iter().map(|el| {
+                                // We should not filter_map to preserve element count property of the wildcard on the parent
+                                el.pointer(&DataCache::target_to_pointer(suffix)).unwrap_or(&Value::Null)
+                            }).collect::<Vec<&'b Value>>()
+                        }
+                    },
+                    None => Vec::new(),
+                }
+            },
+            _ => {
+                // More than 1 wildcard pattern is not supported : spec not yet indefined
+                log::info!("[WARN] DataCache get_list : multiple wildcards pattern is not supported");
+                Vec::new()
+            }
+        }
     }
 
     /// Match a pattern while storing captured named capture groups in data_cache

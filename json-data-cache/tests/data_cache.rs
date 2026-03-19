@@ -1,7 +1,7 @@
 use std::io::BufWriter;
 
 use json_data_cache::{DataCache, DataCacheOptions};
-use serde_json::json;
+use serde_json::{Value, json};
 
 #[test]
 fn data_cache() {
@@ -126,7 +126,6 @@ fn data_cache() {
         "non_object" // Unaffected
     ])));
 
-
     // Test replacements
     for (input, replacement) in [
         ("{$basic_key.nested_key}", "nested_value"),
@@ -141,4 +140,60 @@ fn data_cache() {
         let writer_string = String::from_utf8(writer.buffer().to_vec()).unwrap();
         assert_eq!(&writer_string, replacement);
     }
+}
+
+#[test]
+fn data_cache_get_list_test() {
+    let mut data_cache = DataCache::new(DataCacheOptions::default());
+    
+    data_cache.insert("list", json!([
+        {
+            "id": 1,
+            "name": "first"
+        },
+        {
+            "id": 2,
+            "name": "second"
+        },
+        {
+            "id": 3,
+            "name": "third"
+        },
+    ]));
+
+    // Wildcard allows to build arrays
+    assert_eq!(data_cache.get_list("list.*"), Vec::from([
+        &json!({
+            "id": 1,
+            "name": "first"
+        }),
+        &json!({
+            "id": 2,
+            "name": "second"
+        }),
+        &json!({
+            "id": 3,
+            "name": "third"
+        }),
+    ]));
+    assert_eq!(data_cache.get_list("list.*"), data_cache.get("list")
+        .map(|v| v.as_array().unwrap().iter().collect())
+        .unwrap_or(Vec::new())); // Technically this is a shortcut
+    
+    assert_eq!(data_cache.get_list("list.*.id"), Vec::from([
+        &json!(1),
+        &json!(2),
+        &json!(3)
+    ]));
+    assert_eq!(data_cache.get_list("list.*.name"), Vec::from([
+        &json!("first"),
+        &json!("second"),
+        &json!("third"),
+    ]));
+
+    assert_eq!(data_cache.get_list("*"), Vec::<&Value>::new()); // With DataCache, the top level JSON structure is always an object
+
+    // For now, only one wildcard is supported
+    assert_eq!(data_cache.get_list("list.*.*"), Vec::<&Value>::new());
+    assert_eq!(data_cache.get_list("list*"), Vec::<&Value>::new());
 }
